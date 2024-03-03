@@ -1,0 +1,29 @@
+{
+    "dry_run": false,
+    "log_level": "info",
+    "max_threads": 5,
+    "refresh_commands": [
+      ["/usr/bin/docker", "compose", "pull"],
+      ["/usr/bin/docker", "compose", "up", "-d", "--remove-orphans"]
+    ],
+    "apps": [
+      {
+        "name": "jellyfin",
+        "path": "/apps/jellyfin",
+        "after_commands": []
+      },
+      {
+        "name": "some-disabled-app",
+        "path": "/mnt/storage/apps/some-disabled-app",
+        "after_commands": [
+          ["/usr/bin/docker", "update", "--restart=no", "some-disabled-app"],
+          ["/usr/bin/docker", "stop", "some-disabled-app"]
+        ]
+      }
+    ],
+    "after_commands": [
+        ["/usr/bin/sleep", "2"],
+        ["/usr/bin/docker", "ps", "-a", "--format", "table {{.Names}}\t{{.Status}}\t{{.Image}}"]
+    ]
+  }
+  
