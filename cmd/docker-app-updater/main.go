@@ -114,9 +114,19 @@ func executeCommand(cmd []string, path string, appName string, config Config) (s
 	} else {
 		if path != "" {
 			oldPath, _ := os.Getwd()
-			os.Chdir(path)
+			if err := os.Chdir(path); err != nil {
+				return "", fmt.Errorf("failed changing path: %w", err)
+			}
+
 			defer func() {
-				os.Chdir(oldPath)
+				if err := os.Chdir(oldPath); err != nil {
+					logrus.Warnf(
+						"[%s] failed changing back to original path %s: %s",
+						appName,
+						oldPath,
+						err.Error(),
+					)
+				}
 			}()
 		}
 

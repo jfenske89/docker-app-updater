@@ -15,7 +15,7 @@ test:
 	go test -v ./...
 
 compile:
-	go build -o ./bin/docker-app-updater ./internal/cmd/docker-app-updater
+	go build -o ./bin/docker-app-updater ./cmd/docker-app-updater
 
 lint:
 	golangci-lint run --verbose
