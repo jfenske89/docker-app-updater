@@ -26,14 +26,14 @@ func main() {
 		logrus.Debugf("log level: %s", level.String())
 	}
 
-	wg := pool.New().WithMaxGoroutines(config.MaxThreads)
+	p := pool.New().WithMaxGoroutines(config.MaxThreads)
 	logrus.Debugf("max threads: %d", config.MaxThreads)
 
 	for i := range config.Apps {
 		app := config.Apps[i]
 		logrus.Debugf("[%s] updating", app.Name)
 
-		wg.Go(func() {
+		p.Go(func() {
 			started := time.Now()
 
 			for _, cmd := range config.RefreshCommands {
@@ -46,17 +46,17 @@ func main() {
 					)
 					return
 				}
+			}
 
-				for _, afterCmd := range app.AfterCommands {
-					if _, err := executeCommand(afterCmd, app.Path, app.Name, config); err != nil {
-						// Don't execute anymore commands for this app
-						logrus.Errorf(
-							"[%s] %s",
-							app.Name,
-							err.Error(),
-						)
-						return
-					}
+			for _, afterCmd := range app.AfterCommands {
+				if _, err := executeCommand(afterCmd, app.Path, app.Name, config); err != nil {
+					// Don't execute anymore commands for this app
+					logrus.Errorf(
+						"[%s] %s",
+						app.Name,
+						err.Error(),
+					)
+					return
 				}
 			}
 
@@ -66,7 +66,7 @@ func main() {
 		})
 	}
 
-	wg.Wait()
+	p.Wait()
 
 	if config.AfterCommands != nil {
 		fmt.Println("****************************************************************")
