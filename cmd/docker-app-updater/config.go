@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"strings"
+	"sync"
 
 	"github.com/sirupsen/logrus"
+)
+
+var (
+	config     Config
+	configOnce sync.Once
 )
 
 type Config struct {
@@ -33,68 +38,99 @@ var defaultConfig = Config{
 	},
 }
 
-var staticConfig *Config
-
 func GetConfig() Config {
-	if staticConfig == nil {
-		var path string
-		var possiblePaths []string
+	configOnce.Do(func() { config = loadConfig() })
+	return config
+}
 
-		if possiblePath := os.Getenv("CONFIG_FILE"); possiblePath != "" {
-			possiblePaths = append(possiblePaths, possiblePath)
-		}
+func loadConfig() Config {
+	var path string
+	var possiblePaths []string
 
-		if wd, err := os.Getwd(); err == nil {
-			possiblePaths = append(
-				possiblePaths,
-				strings.TrimSuffix(wd, "/")+"/config/config.json",
-			)
-		}
-
-		if hd, err := os.UserHomeDir(); err == nil {
-			possiblePaths = append(
-				possiblePaths,
-				strings.TrimSuffix(hd, "/")+"/.config/docker-app-updater/config.json",
-			)
-		}
-
-		possiblePaths = append(
-			possiblePaths,
-			"/etc/docker-app-updater/config.json",
-		)
-
-		for _, possiblePath := range possiblePaths {
-			if _, err := os.Stat(possiblePath); errors.Is(err, os.ErrNotExist) {
-				continue
-			} else {
-				path = possiblePath
-				break
-			}
-		}
-
-		staticConfig = new(Config)
-		if jsonBytes, err := os.ReadFile(path); err != nil {
-			logrus.Warnf("failed to read config file: %s", err.Error())
-		} else if err := json.Unmarshal(
-			jsonBytes,
-			staticConfig,
-		); err != nil {
-			logrus.Warnf("failed to parse config: %s", err.Error())
-			staticConfig = &defaultConfig
-		}
-
-		if staticConfig.LogLevel == "" {
-			staticConfig.LogLevel = defaultConfig.LogLevel
-		}
-
-		if staticConfig.MaxThreads == 0 {
-			staticConfig.MaxThreads = defaultConfig.MaxThreads
-		}
-
-		if staticConfig.RefreshCommands == nil {
-			staticConfig.RefreshCommands = defaultConfig.RefreshCommands
-		}
+	if possiblePath := os.Getenv("CONFIG_FILE"); possiblePath != "" {
+		possiblePaths = append(possiblePaths, possiblePath)
 	}
 
-	return *staticConfig
+	if wd, err := os.Getwd(); err == nil {
+		possiblePaths = append(possiblePaths, wd+"/config/config.json")
+	}
+
+	if hd, err := os.UserHomeDir(); err == nil {
+		possiblePaths = append(
+			possiblePaths,
+			hd+"/.config/docker-app-updater/config.json",
+		)
+	}
+
+	possiblePaths = append(
+		possiblePaths,
+		"/etc/docker-app-updater/config.json",
+	)
+
+	for _, possiblePath := range possiblePaths {
+		logrus.Debugf("checking config path: %s", possiblePath)
+
+		fileInfo, err := os.Stat(possiblePath)
+
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+
+			logrus.Warnf("failed to access config file %s: %v", possiblePath, err)
+			continue
+		}
+
+		if fileInfo.IsDir() {
+			logrus.Warnf("config file path %s is a directory, skipping", possiblePath)
+			continue
+		}
+
+		path = possiblePath
+
+		break
+	}
+
+	if path == "" {
+		logrus.Warn("no valid config file found, using default configuration")
+		config = defaultConfig
+		return config
+	}
+
+	config := new(Config)
+	if jsonBytes, err := os.ReadFile(path); err != nil {
+		logrus.Warnf("failed to read config file: %v", err)
+	} else if err := json.Unmarshal(
+		jsonBytes,
+		config,
+	); err != nil {
+		logrus.Warnf("failed to parse config: %s", err.Error())
+		config = &defaultConfig
+	}
+
+	postProcessConfig(config)
+
+	return *config
+}
+
+func postProcessConfig(cfg *Config) {
+	if cfg.LogLevel == "" {
+		cfg.LogLevel = defaultConfig.LogLevel
+	}
+
+	if cfg.Apps == nil {
+		cfg.Apps = []App{}
+	}
+
+	if cfg.MaxThreads <= 0 {
+		logrus.Warnf("invalid max_threads %d, using default (%d)", cfg.MaxThreads, defaultConfig.MaxThreads)
+		cfg.MaxThreads = defaultConfig.MaxThreads
+	} else if cfg.MaxThreads > 100 {
+		logrus.Warnf("max_threads too high (%d), capping at 100", cfg.MaxThreads)
+		cfg.MaxThreads = 100
+	}
+
+	if cfg.RefreshCommands == nil {
+		cfg.RefreshCommands = defaultConfig.RefreshCommands
+	}
 }

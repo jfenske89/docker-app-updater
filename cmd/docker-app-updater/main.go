@@ -104,36 +104,21 @@ func executeCommand(cmd []string, path string, appName string, config Config) (s
 
 	if config.DryRun {
 		logrus.Infof(
-			"[%s] Dry run: %s %s",
+			"[%s] [path=%s] Dry run: %s %s",
 			appName,
+			path,
 			command,
 			strings.Join(arguments, " "),
 		)
 
 		return "***DRY RUN***", nil
 	} else {
+		cmd := exec.Command(command, arguments...)
 		if path != "" {
-			oldPath, _ := os.Getwd()
-			if err := os.Chdir(path); err != nil {
-				return "", fmt.Errorf("failed changing path: %w", err)
-			}
-
-			defer func() {
-				if err := os.Chdir(oldPath); err != nil {
-					logrus.Warnf(
-						"[%s] failed changing back to original path %s: %s",
-						appName,
-						oldPath,
-						err.Error(),
-					)
-				}
-			}()
+			cmd.Dir = path
 		}
 
-		if output, err := exec.Command(
-			command,
-			arguments...,
-		).CombinedOutput(); err != nil {
+		if output, err := cmd.CombinedOutput(); err != nil {
 			return string(output), fmt.Errorf(
 				"failed to run %s %s: %s - %s",
 				command,
@@ -144,10 +129,11 @@ func executeCommand(cmd []string, path string, appName string, config Config) (s
 			)
 		} else {
 			logrus.Debugf(
-				"[%s] [%s %s]: %s",
+				"[%s] [%s %s] [path=%s]: %s",
 				appName,
 				command,
 				strings.Join(arguments, " "),
+				path,
 				strings.ReplaceAll(strings.ReplaceAll(
 					string(output), "\n", "\\n"), "\t", "\\t"),
 			)
@@ -158,8 +144,10 @@ func executeCommand(cmd []string, path string, appName string, config Config) (s
 }
 
 func replaceVariables(input string, path string, appName string) string {
-	output := strings.ReplaceAll(input, "{{app.name}}", appName)
-	output = strings.ReplaceAll(output, "{{app.path}}", path)
-	output = strings.ReplaceAll(output, "{{HOME}}", os.Getenv("HOME"))
-	return output
+	varReplacer := strings.NewReplacer(
+		"{{app.name}}", appName,
+		"{{app.path}}", path,
+		"{{HOME}}", os.Getenv("HOME"),
+	)
+	return varReplacer.Replace(input)
 }
