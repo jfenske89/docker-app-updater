@@ -36,21 +36,11 @@ func main() {
 		p.Go(func() {
 			started := time.Now()
 
-			for _, cmd := range config.RefreshCommands {
-				if _, err := executeCommand(cmd, app.Path, app.Name, config); err != nil {
-					// Don't execute anymore commands for this app
-					logrus.Errorf(
-						"[%s] %s",
-						app.Name,
-						err.Error(),
-					)
-					return
-				}
-			}
+			cmds := append(config.RefreshCommands, app.AfterCommands...)
 
-			for _, afterCmd := range app.AfterCommands {
-				if _, err := executeCommand(afterCmd, app.Path, app.Name, config); err != nil {
-					// Don't execute anymore commands for this app
+			for _, cmd := range cmds {
+				if _, err := executeCommand(cmd, app.Path, app.Name, config); err != nil {
+					// don't execute anymore commands for this app
 					logrus.Errorf(
 						"[%s] %s",
 						app.Name,
