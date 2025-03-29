@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,8 +12,20 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
+func parseFlagsForConfigFile() string {
+	flagSet := flag.NewFlagSet("config", flag.ContinueOnError)
+	configFile := flagSet.String("config", "", "Path to a config file")
+	_ = flagSet.Parse(os.Args[1:])
+
+	if *configFile != "" {
+		return strings.TrimSpace(*configFile)
+	}
+
+	return ""
+}
+
 func main() {
-	config := GetConfig()
+	config := GetConfig(parseFlagsForConfigFile())
 
 	if level, err := logrus.ParseLevel(config.LogLevel); err != nil {
 		logrus.SetLevel(logrus.InfoLevel)

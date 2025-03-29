@@ -15,7 +15,7 @@ See [./config/config.example.json](./config/config.example.json). Copy that to `
 - ~/.config/update-docker-apps/config.json
 - /etc/update-docker-apps/config.json
 
-You can set the path via the `CONFIG_FILE` environment variable.
+You can set the path via the `--config` CLI argument.
 
 ### Structure
 

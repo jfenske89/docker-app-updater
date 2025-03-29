@@ -38,40 +38,39 @@ var defaultConfig = Config{
 	},
 }
 
-func GetConfig() Config {
-	configOnce.Do(func() { config = loadConfig() })
+func GetConfig(configFile string) Config {
+	configOnce.Do(func() { config = loadConfig(configFile) })
 	return config
 }
 
-func loadConfig() Config {
+func loadConfig(configFile string) Config {
 	var path string
 	var possiblePaths []string
 
-	if possiblePath := os.Getenv("CONFIG_FILE"); possiblePath != "" {
-		possiblePaths = append(possiblePaths, possiblePath)
-	}
+	if configFile != "" {
+		possiblePaths = append(possiblePaths, configFile)
+	} else {
+		if wd, err := os.Getwd(); err == nil {
+			possiblePaths = append(possiblePaths, wd+"/config/config.json")
+		}
 
-	if wd, err := os.Getwd(); err == nil {
-		possiblePaths = append(possiblePaths, wd+"/config/config.json")
-	}
+		if hd, err := os.UserHomeDir(); err == nil {
+			possiblePaths = append(
+				possiblePaths,
+				hd+"/.config/docker-app-updater/config.json",
+			)
+		}
 
-	if hd, err := os.UserHomeDir(); err == nil {
 		possiblePaths = append(
 			possiblePaths,
-			hd+"/.config/docker-app-updater/config.json",
+			"/etc/docker-app-updater/config.json",
 		)
 	}
-
-	possiblePaths = append(
-		possiblePaths,
-		"/etc/docker-app-updater/config.json",
-	)
 
 	for _, possiblePath := range possiblePaths {
 		logrus.Debugf("checking config path: %s", possiblePath)
 
 		fileInfo, err := os.Stat(possiblePath)
-
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				continue
