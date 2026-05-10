@@ -4,14 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
-	"sync"
 
 	"github.com/sirupsen/logrus"
-)
-
-var (
-	config     Config
-	configOnce sync.Once
 )
 
 type Config struct {
@@ -39,8 +33,7 @@ var defaultConfig = Config{
 }
 
 func GetConfig(configFile string) Config {
-	configOnce.Do(func() { config = loadConfig(configFile) })
-	return config
+	return loadConfig(configFile)
 }
 
 func loadConfig(configFile string) Config {
@@ -61,10 +54,7 @@ func loadConfig(configFile string) Config {
 			)
 		}
 
-		possiblePaths = append(
-			possiblePaths,
-			"/etc/docker-app-updater/config.json",
-		)
+		possiblePaths = append(possiblePaths, "/etc/docker-app-updater/config.json")
 	}
 
 	for _, possiblePath := range possiblePaths {
@@ -86,30 +76,31 @@ func loadConfig(configFile string) Config {
 		}
 
 		path = possiblePath
-
 		break
 	}
 
 	if path == "" {
 		logrus.Warn("no valid config file found, using default configuration")
-		config = defaultConfig
-		return config
+		return defaultConfig
 	}
 
-	config := new(Config)
-	if jsonBytes, err := os.ReadFile(path); err != nil {
+	jsonBytes, err := os.ReadFile(path)
+	if err != nil {
 		logrus.Warnf("failed to read config file: %v", err)
-	} else if err := json.Unmarshal(
-		jsonBytes,
-		config,
-	); err != nil {
-		logrus.Warnf("failed to parse config: %s", err.Error())
-		config = &defaultConfig
+		return defaultConfig
 	}
 
-	postProcessConfig(config)
+	return parseConfig(jsonBytes)
+}
 
-	return *config
+func parseConfig(data []byte) Config {
+	cfg := new(Config)
+	if err := json.Unmarshal(data, cfg); err != nil {
+		logrus.Warnf("failed to parse config: %s", err.Error())
+		*cfg = defaultConfig
+	}
+	postProcessConfig(cfg)
+	return *cfg
 }
 
 func postProcessConfig(cfg *Config) {
@@ -130,6 +121,6 @@ func postProcessConfig(cfg *Config) {
 	}
 
 	if cfg.RefreshCommands == nil {
-		cfg.RefreshCommands = defaultConfig.RefreshCommands
+		cfg.RefreshCommands = append([][]string(nil), defaultConfig.RefreshCommands...)
 	}
 }

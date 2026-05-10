@@ -6,7 +6,7 @@ install:
 	go mod tidy
 
 fmt:
-	goimports -w --local codeberg.org/jfenske ./
+	go run mvdan.cc/gofumpt@latest -w ./
 
 vet:
 	go vet ./...

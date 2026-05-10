@@ -160,5 +160,6 @@ fabric.properties
 
 # Custom
 bin/
+/docker-app-updater
 scratch/
 config/config.json

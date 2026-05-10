@@ -1,4 +1,4 @@
-module codeberg.org/jfenske/docker-app-updater
+module github.com/jfenske89/docker-app-updater
 
 go 1.25.4
 
@@ -9,5 +9,5 @@ require (
 
 require (
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 )

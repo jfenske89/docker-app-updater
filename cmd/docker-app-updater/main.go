@@ -12,6 +12,19 @@ import (
 	"github.com/sourcegraph/conc/pool"
 )
 
+// CommandExecutor runs a single command and returns its combined output.
+// Injected so callers can substitute a fake in tests.
+type CommandExecutor func(name string, args []string, dir string) (string, error)
+
+func osExecutor(name string, args []string, dir string) (string, error) {
+	cmd := exec.Command(name, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
 func parseFlagsForConfigFile() string {
 	flagSet := flag.NewFlagSet("config", flag.ContinueOnError)
 	configFile := flagSet.String("config", "", "Path to a config file")
@@ -49,18 +62,9 @@ func main() {
 		p.Go(func() {
 			started := time.Now()
 
-			cmds := append(config.RefreshCommands, app.AfterCommands...)
-
-			for _, cmd := range cmds {
-				if _, err := executeCommand(cmd, app.Path, app.Name, config); err != nil {
-					// don't execute anymore commands for this app
-					logrus.Errorf(
-						"[%s] %s",
-						app.Name,
-						err.Error(),
-					)
-					return
-				}
+			if err := updateApp(app, config, osExecutor); err != nil {
+				logrus.Errorf("[%s] %s", app.Name, err.Error())
+				return
 			}
 
 			if !config.DryRun {
@@ -71,30 +75,42 @@ func main() {
 
 	p.Wait()
 
-	if config.AfterCommands != nil {
+	if len(config.AfterCommands) > 0 {
 		fmt.Println("****************************************************************")
 	}
 
 	for _, afterCmd := range config.AfterCommands {
-		if output, err := executeCommand(afterCmd, "", "POST-UPDATE", config); err != nil {
-			// don't execute anymore post-update commands
+		output, err := executeCommand(afterCmd, "", "POST-UPDATE", config, osExecutor)
+		if err != nil {
 			logrus.Errorf(
 				"[POST-UPDATE]\n$ %s\n[ERROR] %s",
 				strings.Join(afterCmd, " "),
 				err.Error(),
 			)
 			return
-		} else {
-			fmt.Printf(
-				"[POST-UPDATE]\n$ %s\n  %s\n",
-				strings.Join(afterCmd, " "),
-				strings.TrimSuffix(strings.ReplaceAll(output, "\n", "\n  "), "\n"),
-			)
 		}
+		fmt.Printf(
+			"[POST-UPDATE]\n$ %s\n  %s\n",
+			strings.Join(afterCmd, " "),
+			strings.TrimSuffix(strings.ReplaceAll(output, "\n", "\n  "), "\n"),
+		)
 	}
 }
 
-func executeCommand(cmd []string, path string, appName string, config Config) (string, error) {
+func updateApp(app App, config Config, executor CommandExecutor) error {
+	cmds := make([][]string, 0, len(config.RefreshCommands)+len(app.AfterCommands))
+	cmds = append(cmds, config.RefreshCommands...)
+	cmds = append(cmds, app.AfterCommands...)
+
+	for _, cmd := range cmds {
+		if _, err := executeCommand(cmd, app.Path, app.Name, config, executor); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func executeCommand(cmd []string, path string, appName string, config Config, executor CommandExecutor) (string, error) {
 	var command string
 	var arguments []string
 	for _, arg := range cmd {
@@ -113,37 +129,30 @@ func executeCommand(cmd []string, path string, appName string, config Config) (s
 			command,
 			strings.Join(arguments, " "),
 		)
-
 		return "***DRY RUN***", nil
-	} else {
-		cmd := exec.Command(command, arguments...)
-		if path != "" {
-			cmd.Dir = path
-		}
-
-		if output, err := cmd.CombinedOutput(); err != nil {
-			return string(output), fmt.Errorf(
-				"failed to run %s %s: %s - %s",
-				command,
-				strings.Join(arguments, " "),
-				err.Error(),
-				strings.ReplaceAll(strings.ReplaceAll(
-					string(output), "\n", "\\n"), "\t", "\\t"),
-			)
-		} else {
-			logrus.Debugf(
-				"[%s] [%s %s] [path=%s]: %s",
-				appName,
-				command,
-				strings.Join(arguments, " "),
-				path,
-				strings.ReplaceAll(strings.ReplaceAll(
-					string(output), "\n", "\\n"), "\t", "\\t"),
-			)
-
-			return string(output), nil
-		}
 	}
+
+	output, err := executor(command, arguments, path)
+	if err != nil {
+		return output, fmt.Errorf(
+			"failed to run %s %s: %s - %s",
+			command,
+			strings.Join(arguments, " "),
+			err.Error(),
+			strings.ReplaceAll(strings.ReplaceAll(output, "\n", "\\n"), "\t", "\\t"),
+		)
+	}
+
+	logrus.Debugf(
+		"[%s] [%s %s] [path=%s]: %s",
+		appName,
+		command,
+		strings.Join(arguments, " "),
+		path,
+		strings.ReplaceAll(strings.ReplaceAll(output, "\n", "\\n"), "\t", "\\t"),
+	)
+
+	return output, nil
 }
 
 func replaceVariables(input string, path string, appName string) string {
