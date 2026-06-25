@@ -57,6 +57,10 @@ func main() {
 
 	for i := range config.Apps {
 		app := config.Apps[i]
+		if app.Skip {
+			continue
+		}
+
 		logrus.Debugf("[%s] updating", app.Name)
 
 		p.Go(func() {

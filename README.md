@@ -28,6 +28,7 @@ You can set the path via the `--config` CLI argument.
   - **name**: (*string*) a display name for logs
   - **path**: (*string*) a working directory (for example: where docker-compose.yaml is located)
   - **after_commands**: (*[][]string*) commands and arguments to run after this specific app is processed
+  - **skip**: (*boolean*) skip this app entirely when true (*defaults to false*)
 
 #### Commands and arguments
 
