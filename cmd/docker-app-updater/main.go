@@ -55,11 +55,9 @@ func main() {
 	p := pool.New().WithMaxGoroutines(config.MaxThreads)
 	logrus.Debugf("max threads: %d", config.MaxThreads)
 
-	for i := range config.Apps {
-		app := config.Apps[i]
-		if app.Skip {
-			continue
-		}
+	apps := filterApps(config.Apps)
+	for i := range apps {
+		app := apps[i]
 
 		logrus.Debugf("[%s] updating", app.Name)
 
@@ -99,6 +97,17 @@ func main() {
 			strings.TrimSuffix(strings.ReplaceAll(output, "\n", "\n  "), "\n"),
 		)
 	}
+}
+
+func filterApps(apps []App) []App {
+	result := make([]App, 0, len(apps))
+	for _, app := range apps {
+		if app.Skip {
+			continue
+		}
+		result = append(result, app)
+	}
+	return result
 }
 
 func updateApp(app App, config Config, executor CommandExecutor) error {

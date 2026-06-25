@@ -210,3 +210,98 @@ func TestUpdateApp_NoAfterCommands(t *testing.T) {
 		t.Errorf("expected 2 commands, got %d: %v", len(executed), executed)
 	}
 }
+
+func TestFilterApps_ExcludesSkippedAppsPreservingOrder(t *testing.T) {
+	apps := []App{
+		{Name: "a"},
+		{Name: "b", Skip: true},
+		{Name: "c"},
+		{Name: "d", Skip: true},
+	}
+
+	got := filterApps(apps)
+
+	want := []string{"a", "c"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d apps, got %d: %v", len(want), len(got), got)
+	}
+	for i, w := range want {
+		if got[i].Name != w {
+			t.Errorf("app[%d]: expected %q, got %q", i, w, got[i].Name)
+		}
+	}
+}
+
+func TestFilterApps_NoneSkipped(t *testing.T) {
+	apps := []App{{Name: "a"}, {Name: "b"}}
+
+	got := filterApps(apps)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 apps, got %d: %v", len(got), got)
+	}
+}
+
+func TestFilterApps_AllSkipped(t *testing.T) {
+	apps := []App{{Name: "a", Skip: true}, {Name: "b", Skip: true}}
+
+	got := filterApps(apps)
+
+	if len(got) != 0 {
+		t.Errorf("expected no apps, got %d: %v", len(got), got)
+	}
+}
+
+func TestUpdateApp_AppRefreshCommandsOverrideGlobal(t *testing.T) {
+	var executed []string
+	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+		executed = append(executed, name)
+		return "", nil
+	}
+
+	app := App{
+		Name:            "myapp",
+		Path:            "/app",
+		RefreshCommands: [][]string{{"custom-pull"}, {"custom-up"}},
+		AfterCommands:   [][]string{{"notify"}},
+	}
+	cfg := Config{RefreshCommands: [][]string{{"pull"}, {"up"}}}
+
+	if err := updateApp(app, cfg, fakeExecutor); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	want := []string{"custom-pull", "custom-up", "notify"}
+	if len(executed) != len(want) {
+		t.Fatalf("expected %d commands, got %d: %v", len(want), len(executed), executed)
+	}
+	for i, w := range want {
+		if executed[i] != w {
+			t.Errorf("command[%d]: expected %q, got %q", i, w, executed[i])
+		}
+	}
+}
+
+func TestUpdateApp_EmptyAppRefreshCommandsInheritsGlobal(t *testing.T) {
+	var executed []string
+	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+		executed = append(executed, name)
+		return "", nil
+	}
+
+	// An explicit but empty list inherits the global refresh_commands, same as omitting it.
+	app := App{Name: "myapp", Path: "/app", RefreshCommands: [][]string{}}
+	cfg := Config{RefreshCommands: [][]string{{"pull"}, {"up"}}}
+
+	if err := updateApp(app, cfg, fakeExecutor); err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	want := []string{"pull", "up"}
+	if len(executed) != len(want) {
+		t.Fatalf("expected %d commands, got %d: %v", len(want), len(executed), executed)
+	}
+	for i, w := range want {
+		if executed[i] != w {
+			t.Errorf("command[%d]: expected %q, got %q", i, w, executed[i])
+		}
+	}
+}
