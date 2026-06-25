@@ -102,8 +102,14 @@ func main() {
 }
 
 func updateApp(app App, config Config, executor CommandExecutor) error {
-	cmds := make([][]string, 0, len(config.RefreshCommands)+len(app.AfterCommands))
-	cmds = append(cmds, config.RefreshCommands...)
+	// an app's refresh_commands will override global commands
+	refreshCommands := config.RefreshCommands
+	if len(app.RefreshCommands) > 0 {
+		refreshCommands = app.RefreshCommands
+	}
+
+	cmds := make([][]string, 0, len(refreshCommands)+len(app.AfterCommands))
+	cmds = append(cmds, refreshCommands...)
 	cmds = append(cmds, app.AfterCommands...)
 
 	for _, cmd := range cmds {

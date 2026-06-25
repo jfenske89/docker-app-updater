@@ -13,6 +13,15 @@
         "after_commands": []
       },
       {
+        "name": "custom-update-app",
+        "path": "/apps/custom-update-app",
+        "refresh_commands": [
+          ["/usr/bin/docker", "compose", "pull"],
+          ["/usr/bin/docker", "compose", "up", "-d", "--force-recreate"]
+        ],
+        "after_commands": []
+      },
+      {
         "name": "some-disabled-app",
         "path": "/mnt/storage/apps/some-disabled-app",
         "after_commands": [

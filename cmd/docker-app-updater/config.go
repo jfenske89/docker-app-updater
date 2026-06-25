@@ -18,10 +18,11 @@ type Config struct {
 }
 
 type App struct {
-	Name          string     `json:"name"`
-	Path          string     `json:"path"`
-	AfterCommands [][]string `json:"after_commands"`
-	Skip          bool       `json:"skip"`
+	Name            string     `json:"name"`
+	Path            string     `json:"path"`
+	RefreshCommands [][]string `json:"refresh_commands"`
+	AfterCommands   [][]string `json:"after_commands"`
+	Skip            bool       `json:"skip"`
 }
 
 var defaultConfig = Config{
