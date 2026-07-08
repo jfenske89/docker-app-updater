@@ -1,9 +1,11 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReplaceVariables(t *testing.T) {
@@ -31,7 +33,7 @@ func TestReplaceVariables(t *testing.T) {
 
 func TestExecuteCommand_DryRun(t *testing.T) {
 	called := false
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		called = true
 		return "", nil
 	}
@@ -50,7 +52,7 @@ func TestExecuteCommand_DryRun(t *testing.T) {
 }
 
 func TestExecuteCommand_Success(t *testing.T) {
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		return "hello\n", nil
 	}
 
@@ -65,7 +67,7 @@ func TestExecuteCommand_Success(t *testing.T) {
 }
 
 func TestExecuteCommand_Failure(t *testing.T) {
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		return "some output\n", errors.New("exit status 1")
 	}
 
@@ -91,7 +93,7 @@ func TestExecuteCommand_VariableSubstitution(t *testing.T) {
 	var capturedArgs []string
 	var capturedDir string
 
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		capturedName = name
 		capturedArgs = args
 		capturedDir = dir
@@ -127,9 +129,37 @@ func TestExecuteCommand_VariableSubstitution(t *testing.T) {
 	}
 }
 
+func TestExecuteCommand_WrapsUnderlyingError(t *testing.T) {
+	sentinel := errors.New("boom")
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
+		return "", sentinel
+	}
+
+	cfg := Config{DryRun: false, CommandTimeoutDuration: time.Second}
+	_, err := executeCommand([]string{"echo", "hello"}, "/tmp", "testapp", cfg, fakeExecutor)
+
+	if !errors.Is(err, sentinel) {
+		t.Errorf("expected wrapped sentinel error, got: %v", err)
+	}
+}
+
+func TestExecuteCommand_TimesOutLongRunningCommand(t *testing.T) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}
+
+	cfg := Config{DryRun: false, CommandTimeoutDuration: 20 * time.Millisecond}
+	_, err := executeCommand([]string{"sleep", "60"}, "/tmp", "testapp", cfg, fakeExecutor)
+
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("expected wrapped context.DeadlineExceeded, got: %v", err)
+	}
+}
+
 func TestUpdateApp_RunsRefreshThenAfterCommands(t *testing.T) {
 	var executed []string
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		executed = append(executed, name)
 		return "", nil
 	}
@@ -153,7 +183,7 @@ func TestUpdateApp_RunsRefreshThenAfterCommands(t *testing.T) {
 
 func TestUpdateApp_StopsOnFirstError(t *testing.T) {
 	callCount := 0
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		callCount++
 		if name == "up" {
 			return "", errors.New("container failed to start")
@@ -177,7 +207,7 @@ func TestUpdateApp_StopsOnFirstError(t *testing.T) {
 }
 
 func TestUpdateApp_DoesNotMutateRefreshCommands(t *testing.T) {
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		return "", nil
 	}
 
@@ -195,7 +225,7 @@ func TestUpdateApp_DoesNotMutateRefreshCommands(t *testing.T) {
 
 func TestUpdateApp_NoAfterCommands(t *testing.T) {
 	var executed []string
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		executed = append(executed, name)
 		return "", nil
 	}
@@ -254,7 +284,7 @@ func TestFilterApps_AllSkipped(t *testing.T) {
 
 func TestUpdateApp_AppRefreshCommandsOverrideGlobal(t *testing.T) {
 	var executed []string
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		executed = append(executed, name)
 		return "", nil
 	}
@@ -283,7 +313,7 @@ func TestUpdateApp_AppRefreshCommandsOverrideGlobal(t *testing.T) {
 
 func TestUpdateApp_EmptyAppRefreshCommandsInheritsGlobal(t *testing.T) {
 	var executed []string
-	fakeExecutor := func(name string, args []string, dir string) (string, error) {
+	fakeExecutor := func(ctx context.Context, name string, args []string, dir string) (string, error) {
 		executed = append(executed, name)
 		return "", nil
 	}

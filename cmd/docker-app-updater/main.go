@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -14,10 +16,10 @@ import (
 
 // CommandExecutor runs a single command and returns its combined output.
 // Injected so callers can substitute a fake in tests.
-type CommandExecutor func(name string, args []string, dir string) (string, error)
+type CommandExecutor func(ctx context.Context, name string, args []string, dir string) (string, error)
 
-func osExecutor(name string, args []string, dir string) (string, error) {
-	cmd := exec.Command(name, args...)
+func osExecutor(ctx context.Context, name string, args []string, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -38,6 +40,10 @@ func parseFlagsForConfigFile() string {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	config := GetConfig(parseFlagsForConfigFile())
 
 	if level, err := logrus.ParseLevel(config.LogLevel); err != nil {
@@ -54,6 +60,9 @@ func main() {
 
 	p := pool.New().WithMaxGoroutines(config.MaxThreads)
 	logrus.Debugf("max threads: %d", config.MaxThreads)
+	logrus.Debugf("command timeout: %s", config.CommandTimeoutDuration)
+
+	var hadFailure atomic.Bool
 
 	apps := filterApps(config.Apps)
 	for i := range apps {
@@ -66,6 +75,7 @@ func main() {
 
 			if err := updateApp(app, config, osExecutor); err != nil {
 				logrus.Errorf("[%s] %s", app.Name, err.Error())
+				hadFailure.Store(true)
 				return
 			}
 
@@ -89,7 +99,8 @@ func main() {
 				strings.Join(afterCmd, " "),
 				err.Error(),
 			)
-			return
+			hadFailure.Store(true)
+			break
 		}
 		fmt.Printf(
 			"[POST-UPDATE]\n$ %s\n  %s\n",
@@ -97,6 +108,11 @@ func main() {
 			strings.TrimSuffix(strings.ReplaceAll(output, "\n", "\n  "), "\n"),
 		)
 	}
+
+	if hadFailure.Load() {
+		return 1
+	}
+	return 0
 }
 
 func filterApps(apps []App) []App {
@@ -151,13 +167,16 @@ func executeCommand(cmd []string, path string, appName string, config Config, ex
 		return "***DRY RUN***", nil
 	}
 
-	output, err := executor(command, arguments, path)
+	ctx, cancel := context.WithTimeout(context.Background(), config.CommandTimeoutDuration)
+	defer cancel()
+
+	output, err := executor(ctx, command, arguments, path)
 	if err != nil {
 		return output, fmt.Errorf(
-			"failed to run %s %s: %s - %s",
+			"failed to run %s %s: %w - %s",
 			command,
 			strings.Join(arguments, " "),
-			err.Error(),
+			err,
 			strings.ReplaceAll(strings.ReplaceAll(output, "\n", "\\n"), "\t", "\\t"),
 		)
 	}

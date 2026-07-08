@@ -2,6 +2,7 @@ package main
 
 import (
 	"testing"
+	"time"
 )
 
 func TestParseConfig_ValidFull(t *testing.T) {
@@ -119,5 +120,40 @@ func TestPostProcessConfig_NilRefreshCommandsCopiesDefault(t *testing.T) {
 	cfg.RefreshCommands[0] = []string{"mutated"}
 	if defaultConfig.RefreshCommands[0][0] == "mutated" {
 		t.Error("postProcessConfig shared RefreshCommands backing array with defaultConfig")
+	}
+}
+
+func TestPostProcessConfig_CommandTimeoutEmptyUsesDefault(t *testing.T) {
+	cfg := &Config{LogLevel: "info", MaxThreads: 3, RefreshCommands: [][]string{{}}}
+	postProcessConfig(cfg)
+	if cfg.CommandTimeout != defaultCommandTimeout {
+		t.Errorf("expected default CommandTimeout %q, got %q", defaultCommandTimeout, cfg.CommandTimeout)
+	}
+	if cfg.CommandTimeoutDuration != defaultCommandTimeoutDuration {
+		t.Errorf("expected default CommandTimeoutDuration %s, got %s", defaultCommandTimeoutDuration, cfg.CommandTimeoutDuration)
+	}
+}
+
+func TestPostProcessConfig_CommandTimeoutInvalidUsesDefault(t *testing.T) {
+	cfg := &Config{LogLevel: "info", MaxThreads: 3, RefreshCommands: [][]string{{}}, CommandTimeout: "not-a-duration"}
+	postProcessConfig(cfg)
+	if cfg.CommandTimeoutDuration != defaultCommandTimeoutDuration {
+		t.Errorf("expected default CommandTimeoutDuration %s, got %s", defaultCommandTimeoutDuration, cfg.CommandTimeoutDuration)
+	}
+}
+
+func TestPostProcessConfig_CommandTimeoutNonPositiveUsesDefault(t *testing.T) {
+	cfg := &Config{LogLevel: "info", MaxThreads: 3, RefreshCommands: [][]string{{}}, CommandTimeout: "0s"}
+	postProcessConfig(cfg)
+	if cfg.CommandTimeoutDuration != defaultCommandTimeoutDuration {
+		t.Errorf("expected default CommandTimeoutDuration %s, got %s", defaultCommandTimeoutDuration, cfg.CommandTimeoutDuration)
+	}
+}
+
+func TestPostProcessConfig_CommandTimeoutValid(t *testing.T) {
+	cfg := &Config{LogLevel: "info", MaxThreads: 3, RefreshCommands: [][]string{{}}, CommandTimeout: "90s"}
+	postProcessConfig(cfg)
+	if cfg.CommandTimeoutDuration != 90*time.Second {
+		t.Errorf("expected CommandTimeoutDuration 90s, got %s", cfg.CommandTimeoutDuration)
 	}
 }

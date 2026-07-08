@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -15,6 +16,9 @@ type Config struct {
 	RefreshCommands [][]string `json:"refresh_commands"`
 	Apps            []App      `json:"apps"`
 	AfterCommands   [][]string `json:"after_commands"`
+
+	CommandTimeout         string        `json:"command_timeout"`
+	CommandTimeoutDuration time.Duration `json:"-"`
 }
 
 type App struct {
@@ -25,9 +29,23 @@ type App struct {
 	Skip            bool       `json:"skip"`
 }
 
+const defaultCommandTimeout = "15m"
+
+var defaultCommandTimeoutDuration = mustParseDuration(defaultCommandTimeout)
+
+func mustParseDuration(s string) time.Duration {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic(err)
+	}
+	return d
+}
+
 var defaultConfig = Config{
-	LogLevel:   "info",
-	MaxThreads: 3,
+	LogLevel:               "info",
+	MaxThreads:             3,
+	CommandTimeout:         defaultCommandTimeout,
+	CommandTimeoutDuration: defaultCommandTimeoutDuration,
 	RefreshCommands: [][]string{
 		{"docker", "compose", "pull"},
 		{"docker", "compose", "up", "-d", "--remove-orphans"},
@@ -124,5 +142,20 @@ func postProcessConfig(cfg *Config) {
 
 	if cfg.RefreshCommands == nil {
 		cfg.RefreshCommands = append([][]string(nil), defaultConfig.RefreshCommands...)
+	}
+
+	if cfg.CommandTimeout == "" {
+		cfg.CommandTimeout = defaultCommandTimeout
+		cfg.CommandTimeoutDuration = defaultCommandTimeoutDuration
+	} else if d, err := time.ParseDuration(cfg.CommandTimeout); err != nil || d <= 0 {
+		logrus.Warnf(
+			"invalid command_timeout %q, using default (%s)",
+			cfg.CommandTimeout,
+			defaultCommandTimeout,
+		)
+		cfg.CommandTimeout = defaultCommandTimeout
+		cfg.CommandTimeoutDuration = defaultCommandTimeoutDuration
+	} else {
+		cfg.CommandTimeoutDuration = d
 	}
 }

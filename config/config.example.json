@@ -2,6 +2,7 @@
     "dry_run": false,
     "log_level": "info",
     "max_threads": 5,
+    "command_timeout": "15m",
     "refresh_commands": [
       ["/usr/bin/docker", "compose", "pull"],
       ["/usr/bin/docker", "compose", "up", "-d", "--remove-orphans"]

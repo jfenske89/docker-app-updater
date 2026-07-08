@@ -1,6 +1,6 @@
 module github.com/jfenske89/docker-app-updater
 
-go 1.25.4
+go 1.26.1
 
 require (
 	github.com/sirupsen/logrus v1.9.4

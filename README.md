@@ -19,17 +19,18 @@ You can set the path via the `--config` CLI argument.
 
 ### Structure
 
-- **dry_run**: (*boolean*) commands are not executed when true (*defaults to false*)
-- **log_level**: (*string*) a logrus log level (*defaults to info*)
-- **max_threads**: (*integer*) number of app directories to process at one time (*defaults to 3*)
-- **refresh_commands**: (*[][]string*) commands and arguments to run in each directory (*defaults to `docker compose pull && docker compose up -d --remove-orphans`*)
-- **after_commands**: (*[][]string*) commands and arguments to run after apps are processed
-- **apps**: (*[]object*) configuration for each app:
-  - **name**: (*string*) a display name for logs
-  - **path**: (*string*) a working directory (for example: where docker-compose.yaml is located)
-  - **refresh_commands**: (*[][]string*) commands and arguments to run for this specific app (overriding the global command).
-  - **after_commands**: (*[][]string*) commands and arguments to run after this specific app is processed
-  - **skip**: (*boolean*) skip this app entirely when true (*defaults to false*)
+- **dry_run**: (_boolean_) commands are not executed when true (_defaults to false_)
+- **log_level**: (_string_) a logrus log level (_defaults to info_)
+- **max_threads**: (_integer_) number of app directories to process at one time (_defaults to 3_)
+- **command_timeout**: (_string_) a Go duration (e.g. `10m`, `90s`) that each command is allowed to run before it is killed and treated as a failure (_defaults to 15m_)
+- **refresh_commands**: (_[][]string_) commands and arguments to run in each directory (_defaults to `docker compose pull && docker compose up -d --remove-orphans`_)
+- **after_commands**: (_[][]string_) commands and arguments to run after apps are processed
+- **apps**: (_[]object_) configuration for each app:
+  - **name**: (_string_) a display name for logs
+  - **path**: (_string_) a working directory (for example: where docker-compose.yaml is located)
+  - **refresh_commands**: (_[][]string_) commands and arguments to run for this specific app (overriding the global command).
+  - **after_commands**: (_[][]string_) commands and arguments to run after this specific app is processed
+  - **skip**: (_boolean_) skip this app entirely when true (_defaults to false_)
 
 #### Commands and arguments
 
