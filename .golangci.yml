@@ -1,0 +1,10 @@
+version: "2"
+
+linters:
+  enable:
+    - gosec
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close

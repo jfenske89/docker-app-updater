@@ -1,15 +1,20 @@
 PROJECT_NAME=docker-app-updater
 
-all: install fmt vet lint test compile
+all: deps fmt lint test compile vuln
 
-install:
+deps:
+	go mod tidy
+
+deps-update:
+	go get -u ./...
 	go mod tidy
 
 fmt:
 	go run mvdan.cc/gofumpt@latest -w ./
+	npx prettier -w *.md --log-level=warn
 
-vet:
-	go vet ./...
+lint:
+	golangci-lint run --verbose
 
 test:
 	go test -v ./...
@@ -17,9 +22,16 @@ test:
 compile:
 	go build -o ./bin/docker-app-updater ./cmd/docker-app-updater
 
-lint:
-	golangci-lint run --verbose
+vuln:
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-upgrade:
-	go get -u ./...
-	go mod tidy
+modernize:
+	go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest ./...
+
+modernize-fix:
+	go run golang.org/x/tools/go/analysis/passes/modernize/cmd/modernize@latest -fix ./...
+	make test
+	make lint
+
+deploy:
+	./scripts/deploy.sh

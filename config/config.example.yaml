@@ -1,0 +1,75 @@
+# Copy to ./config/config.yaml (or one of the other paths in the README)
+# and adjust for your fleet.
+
+dry_run: false
+log_level: info
+max_threads: 10
+command_timeout: 15m
+
+# An app with zero containers found (nothing running or ever created for
+# its compose project) is left alone rather than started, so discovery
+# doesn't resurrect something you intentionally took down with
+# "docker compose down". Set to false to update those apps too. Override
+# per app via overrides.<name>.skip_if_no_containers.
+skip_if_no_containers: true
+
+# Directories scanned one level deep for compose projects. A project at
+# <root>/<name>/docker-compose.yml is discovered as app <name>.
+discovery:
+  roots:
+    - /opt/docker/apps
+  compose_filenames:
+    - docker-compose.yml
+    - docker-compose.yaml
+    - compose.yml
+    - compose.yaml
+
+# Applied to every discovered/explicit app unless overridden.
+refresh_commands:
+  - [docker, compose, pull]
+  - [docker, compose, up, -d, --remove-orphans]
+
+# Run once, after every app has been processed.
+after_commands: []
+
+# Apps present under a discovery root but not managed by this tool.
+excludes: []
+# excludes: [pihole]
+
+# Per-app exceptions, keyed by app name. Everything else uses the global
+# refresh_commands above.
+overrides: {}
+# overrides:
+#   audiobookshelf:
+#     refresh_commands: [["./refresh.sh"]]
+#
+#   # Tags are freeform strings you invent yourself - the tool has no
+#   # built-in idea of what a "profile" is called or means. An app with no
+#   # `profiles` key always runs. An app with `profiles` set only runs when
+#   # --profile matches one of them; running with no --profile flag at all
+#   # runs only untagged apps.
+#   immich:
+#     profiles: [heavy]
+#
+#   # Force this one app to run even with zero containers, overriding the
+#   # global skip_if_no_containers default.
+#   new-app:
+#     skip_if_no_containers: false
+
+# Compose projects outside any discovery root. Same shape as an override,
+# plus name/path.
+apps: []
+# apps:
+#   - name: manual-app
+#     path: /srv/manual-app
+#     refresh_commands: [["./deploy.sh"]]
+
+# Literal secret for the MVP. Keep this file out of version control.
+gotify:
+  url: ""
+  token: ""
+  # 0-10, Gotify's message priority. 0 (default) is Gotify's normal priority.
+  priority: 0
+  # Prepended to the message as a bold header, e.g. "**homelab**", so
+  # reports from different hosts can be told apart. Empty by default.
+  label: ""

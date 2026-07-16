@@ -5,38 +5,52 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/sourcegraph/conc/pool"
+
+	"github.com/jfenske89/docker-app-updater/internal/config"
+	"github.com/jfenske89/docker-app-updater/internal/discovery"
+	"github.com/jfenske89/docker-app-updater/internal/exec"
+	"github.com/jfenske89/docker-app-updater/internal/notify/gotify"
+	"github.com/jfenske89/docker-app-updater/internal/report"
+	"github.com/jfenske89/docker-app-updater/internal/runner"
+	"github.com/jfenske89/docker-app-updater/internal/update"
 )
 
-// CommandExecutor runs a single command and returns its combined output.
-// Injected so callers can substitute a fake in tests.
-type CommandExecutor func(ctx context.Context, name string, args []string, dir string) (string, error)
-
-func osExecutor(ctx context.Context, name string, args []string, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, name, args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	output, err := cmd.CombinedOutput()
-	return string(output), err
+type flags struct {
+	configPath     string
+	profile        string
+	dryRun         bool
+	discoverOnly   bool
+	noNotify       bool
+	logLevel       string
+	maxThreads     int
+	commandTimeout string
 }
 
-func parseFlagsForConfigFile() string {
-	flagSet := flag.NewFlagSet("config", flag.ContinueOnError)
-	configFile := flagSet.String("config", "", "Path to a config file")
-	_ = flagSet.Parse(os.Args[1:])
+func parseFlags() flags {
+	configPath := flag.String("config", "", "Path to a config file")
+	profile := flag.String("profile", "", "Only run apps with no profiles set, plus apps tagged with this profile")
+	dryRun := flag.Bool("dry-run", false, "Log commands without executing them (overrides config)")
+	discoverOnly := flag.Bool("discover-only", false, "Print the resolved app list and exit, without updating anything")
+	noNotify := flag.Bool("no-notify", false, "Skip sending the Gotify notification, printing the report instead")
+	logLevel := flag.String("log-level", "", "A logrus level, e.g. debug/info/warn (overrides config)")
+	maxThreads := flag.Int("max-threads", 0, "Apps processed concurrently, capped at 100 (overrides config)")
+	commandTimeout := flag.String("command-timeout", "", "A Go duration each command may run before being killed, e.g. 15m (overrides config)")
+	flag.Parse()
 
-	if *configFile != "" {
-		return strings.TrimSpace(*configFile)
+	return flags{
+		configPath:     strings.TrimSpace(*configPath),
+		profile:        strings.TrimSpace(*profile),
+		dryRun:         *dryRun,
+		discoverOnly:   *discoverOnly,
+		noNotify:       *noNotify,
+		logLevel:       strings.TrimSpace(*logLevel),
+		maxThreads:     *maxThreads,
+		commandTimeout: strings.TrimSpace(*commandTimeout),
 	}
-
-	return ""
 }
 
 func main() {
@@ -44,160 +58,123 @@ func main() {
 }
 
 func run() int {
-	config := GetConfig(parseFlagsForConfigFile())
+	f := parseFlags()
 
-	if level, err := logrus.ParseLevel(config.LogLevel); err != nil {
+	cfg, err := config.Load(f.configPath)
+	if err != nil {
+		logrus.Errorf("failed to load config: %s", err.Error())
+		return 1
+	}
+
+	if f.logLevel != "" {
+		cfg.LogLevel = f.logLevel
+	}
+	if level, err := logrus.ParseLevel(cfg.LogLevel); err != nil {
 		logrus.SetLevel(logrus.InfoLevel)
-		logrus.Warnf(
-			"failed to parse LOG_LEVEL %s: %s",
-			config.LogLevel,
-			err.Error(),
-		)
+		logrus.Warnf("failed to parse log_level %s: %s", cfg.LogLevel, err.Error())
 	} else {
 		logrus.SetLevel(level)
-		logrus.Debugf("log level: %s", level.String())
 	}
 
-	p := pool.New().WithMaxGoroutines(config.MaxThreads)
-	logrus.Debugf("max threads: %d", config.MaxThreads)
-	logrus.Debugf("command timeout: %s", config.CommandTimeoutDuration)
+	if f.dryRun {
+		cfg.DryRun = true
+	}
 
-	var hadFailure atomic.Bool
+	if f.maxThreads > 0 {
+		cfg.MaxThreads = config.NormalizeMaxThreads(f.maxThreads)
+	}
 
-	apps := filterApps(config.Apps)
+	if f.commandTimeout != "" {
+		cfg.CommandTimeout, cfg.CommandTimeoutDuration = config.NormalizeCommandTimeout(f.commandTimeout)
+	}
+
+	apps, err := discovery.Discover(cfg)
+	if err != nil {
+		logrus.Errorf("failed to discover apps: %s", err.Error())
+		return 1
+	}
+	apps = discovery.FilterByProfile(apps, f.profile)
+
+	if f.discoverOnly {
+		for _, app := range apps {
+			fmt.Printf("%s\t%s\n", app.Name, app.Path)
+		}
+		return 0
+	}
+
+	logrus.Infof("updating %d app(s) [profile=%q max_threads=%d dry_run=%t]", len(apps), f.profile, cfg.MaxThreads, cfg.DryRun)
+
+	ctx := context.Background()
+	p := pool.NewWithResults[update.Result]().WithMaxGoroutines(cfg.MaxThreads)
 	for i := range apps {
 		app := apps[i]
-
-		logrus.Debugf("[%s] updating", app.Name)
-
-		p.Go(func() {
-			started := time.Now()
-
-			if err := updateApp(app, config, osExecutor); err != nil {
-				logrus.Errorf("[%s] %s", app.Name, err.Error())
-				hadFailure.Store(true)
-				return
+		p.Go(func() update.Result {
+			logrus.Debugf("[%s] updating", app.Name)
+			result := update.Run(ctx, app, cfg, exec.OS)
+			if result.Err != nil {
+				logrus.Errorf("[%s] %s", app.Name, result.Err.Error())
+			} else if result.Status != update.StatusUnchanged {
+				logrus.Infof("[%s] %s after %s", app.Name, result.Status, result.Duration)
 			}
-
-			if !config.DryRun {
-				logrus.Infof("[%s] updated after %s", app.Name, time.Since(started))
-			}
+			return result
 		})
 	}
+	results := p.Wait()
 
-	p.Wait()
-
-	if len(config.AfterCommands) > 0 {
-		fmt.Println("****************************************************************")
-	}
-
-	for _, afterCmd := range config.AfterCommands {
-		output, err := executeCommand(afterCmd, "", "POST-UPDATE", config, osExecutor)
-		if err != nil {
-			logrus.Errorf(
-				"[POST-UPDATE]\n$ %s\n[ERROR] %s",
-				strings.Join(afterCmd, " "),
-				err.Error(),
-			)
-			hadFailure.Store(true)
-			break
+	hadFailure := false
+	for _, r := range results {
+		if r.Status == update.StatusError {
+			hadFailure = true
 		}
-		fmt.Printf(
-			"[POST-UPDATE]\n$ %s\n  %s\n",
-			strings.Join(afterCmd, " "),
-			strings.TrimSuffix(strings.ReplaceAll(output, "\n", "\n  "), "\n"),
-		)
 	}
 
-	if hadFailure.Load() {
+	if len(cfg.AfterCommands) > 0 {
+		if err := runner.RunAll(ctx, exec.OS, cfg.AfterCommands, "", "GLOBAL", cfg.CommandTimeoutDuration, cfg.DryRun); err != nil {
+			logrus.Errorf("[after_commands] %s", err.Error())
+			hadFailure = true
+		}
+	}
+
+	if err := notify(ctx, cfg, results, f.noNotify); err != nil {
+		logrus.Errorf("failed to send notification: %s", err.Error())
+		hadFailure = true
+	}
+
+	if hadFailure {
 		return 1
 	}
 	return 0
 }
 
-func filterApps(apps []App) []App {
-	result := make([]App, 0, len(apps))
-	for _, app := range apps {
-		if app.Skip {
-			continue
-		}
-		result = append(result, app)
-	}
-	return result
-}
-
-func updateApp(app App, config Config, executor CommandExecutor) error {
-	// an app's refresh_commands will override global commands
-	refreshCommands := config.RefreshCommands
-	if len(app.RefreshCommands) > 0 {
-		refreshCommands = app.RefreshCommands
+func notify(ctx context.Context, cfg config.Config, results []update.Result, noNotify bool) error {
+	message := report.Build(cfg.Gotify.Label, results)
+	if message == "" {
+		logrus.Info("nothing to report, no notification sent")
+		return nil
 	}
 
-	cmds := make([][]string, 0, len(refreshCommands)+len(app.AfterCommands))
-	cmds = append(cmds, refreshCommands...)
-	cmds = append(cmds, app.AfterCommands...)
-
-	for _, cmd := range cmds {
-		if _, err := executeCommand(cmd, app.Path, app.Name, config, executor); err != nil {
-			return err
-		}
+	if cfg.DryRun {
+		logrus.Infof("dry run: would send notification:\n%s", message)
+		return nil
 	}
+
+	if noNotify {
+		logrus.Info("notifications disabled, skipping notification:")
+		fmt.Println(message)
+		return nil
+	}
+
+	if cfg.Gotify.URL == "" || cfg.Gotify.Token == "" {
+		logrus.Warn("gotify.url/token not configured, skipping notification:")
+		fmt.Println(message)
+		return nil
+	}
+
+	client := gotify.NewClient(cfg.Gotify.URL, cfg.Gotify.Token)
+	if err := client.Send(ctx, message, cfg.Gotify.Priority); err != nil {
+		return err
+	}
+
+	logrus.Info("notification sent")
 	return nil
-}
-
-func executeCommand(cmd []string, path string, appName string, config Config, executor CommandExecutor) (string, error) {
-	var command string
-	var arguments []string
-	for _, arg := range cmd {
-		if command == "" {
-			command = replaceVariables(arg, path, appName)
-		} else {
-			arguments = append(arguments, replaceVariables(arg, path, appName))
-		}
-	}
-
-	if config.DryRun {
-		logrus.Infof(
-			"[%s] [path=%s] Dry run: %s %s",
-			appName,
-			path,
-			command,
-			strings.Join(arguments, " "),
-		)
-		return "***DRY RUN***", nil
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), config.CommandTimeoutDuration)
-	defer cancel()
-
-	output, err := executor(ctx, command, arguments, path)
-	if err != nil {
-		return output, fmt.Errorf(
-			"failed to run %s %s: %w - %s",
-			command,
-			strings.Join(arguments, " "),
-			err,
-			strings.ReplaceAll(strings.ReplaceAll(output, "\n", "\\n"), "\t", "\\t"),
-		)
-	}
-
-	logrus.Debugf(
-		"[%s] [%s %s] [path=%s]: %s",
-		appName,
-		command,
-		strings.Join(arguments, " "),
-		path,
-		strings.ReplaceAll(strings.ReplaceAll(output, "\n", "\\n"), "\t", "\\t"),
-	)
-
-	return output, nil
-}
-
-func replaceVariables(input string, path string, appName string) string {
-	varReplacer := strings.NewReplacer(
-		"{{app.name}}", appName,
-		"{{app.path}}", path,
-		"{{HOME}}", os.Getenv("HOME"),
-	)
-	return varReplacer.Replace(input)
 }
