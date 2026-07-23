@@ -1,5 +1,7 @@
 // Package runner executes user-configured command lists (refresh_commands,
-// after_commands), substituting {{app.name}}/{{app.path}}/{{HOME}}.
+// after_commands), substituting {{app.name}}/{{app.path}}/{{HOME}} and
+// retrying a command whose output looks like a transient registry
+// rate-limit response with exponential backoff and jitter.
 package runner
 
 import (
@@ -16,7 +18,9 @@ import (
 
 // Run executes cmd (a command name followed by its arguments) in dir,
 // substituting variables in every token. If dryRun is true, the command is
-// logged but not executed.
+// logged but not executed. If the executor's output looks like a registry
+// rate-limit response, Run retries it per retry, with exponential backoff
+// and jitter between attempts.
 func Run(
 	ctx context.Context,
 	executor exec.Executor,
@@ -25,6 +29,7 @@ func Run(
 	appName string,
 	timeout time.Duration,
 	dryRun bool,
+	retry RetryOptions,
 ) (string, error) {
 	if len(cmd) == 0 {
 		return "", nil
@@ -41,10 +46,37 @@ func Run(
 		return "***DRY RUN***", nil
 	}
 
-	runCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	maxAttempts := max(retry.MaxAttempts, 1)
 
-	output, err := executor(runCtx, command, arguments, dir)
+	var output string
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
+		output, err = executor(runCtx, command, arguments, dir)
+		cancel()
+
+		if err == nil || attempt == maxAttempts || !isRetryable(output, err) {
+			break
+		}
+
+		delay := backoffDelay(retry.BaseDelay, attempt)
+		logrus.Warnf(
+			"[%s] [%s %s] rate-limited, retrying in %s (attempt %d/%d)",
+			appName, command, strings.Join(arguments, " "), delay, attempt, maxAttempts,
+		)
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return output, fmt.Errorf(
+				"failed to run %s %s: %w - retry aborted: %w",
+				command, strings.Join(arguments, " "), err, ctx.Err(),
+			)
+		}
+	}
+
 	if err != nil {
 		return output, fmt.Errorf(
 			"failed to run %s %s: %w - %s",
@@ -76,9 +108,10 @@ func RunAll(
 	appName string,
 	timeout time.Duration,
 	dryRun bool,
+	retry RetryOptions,
 ) error {
 	for _, cmd := range cmds {
-		if _, err := Run(ctx, executor, cmd, dir, appName, timeout, dryRun); err != nil {
+		if _, err := Run(ctx, executor, cmd, dir, appName, timeout, dryRun, retry); err != nil {
 			return err
 		}
 	}

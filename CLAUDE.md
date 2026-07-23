@@ -51,16 +51,17 @@ Execution flows through a small pipeline, each stage its own package under `inte
    `/etc/docker-app-updater/config.yaml`). Also normalizes/validates values shared with CLI flag overrides (see below).
 2. **`discovery`** — `Discover` walks `Discovery.Roots` one level deep for compose files, merges in explicit `cfg.Apps`,
    applies `Excludes`, then layers `Overrides` (keyed by app name) on top. Produces the final, sorted `[]App` list.
-   `FilterByProfile` then narrows that list by `--profile`: an app with no `Profiles` always runs; an app with
-   `Profiles` only runs when `--profile` matches one of its tags.
+   `FilterByProfile` then narrows that list by `--profile`: with no `--profile`, only apps with no `Profiles` run; with
+   `--profile <name>`, only apps whose `Profiles` include that name run (untagged apps are excluded).
 3. **`update`** — `Run` orchestrates one app: snapshot Docker state (`dockercli.Snapshot`) → run `RefreshCommands`
    (`runner.RunAll`) → snapshot again → run `AfterCommands` → `Classify` the before/after diff into a `Status`. Apps run
    concurrently (one goroutine per app via `sourcegraph/conc/pool`, bounded by `MaxThreads`) from `main.go`.
 4. **`dockercli`** — wraps `docker compose ps`/`docker compose images` to fingerprint each service's container ID, image
    ID, and running state; tolerant of both single-JSON-array and newline-delimited-JSON compose output across versions.
 5. **`runner`** — executes a `[][]string` command list via the `exec.Executor` seam, substituting
-   `{{app.name}}`/`{{app.path}}`/`{{HOME}}` in every token, applying `CommandTimeoutDuration`, and honoring `dry_run`
-   (logs instead of executing).
+   `{{app.name}}`/`{{app.path}}`/`{{HOME}}` in every token, applying `CommandTimeoutDuration`, honoring `dry_run` (logs
+   instead of executing), and retrying a command whose output looks like a registry rate-limit response with exponential
+   backoff and jitter, up to `RetryMaxAttempts`.
 6. **`report`** — turns `[]update.Result` into the notification message body, grouped by status in fixed display order
    (`updated` → `recreated` → `restarted` → `skipped` → `error`); `unchanged` is never reported. Returns `""` when
    there's nothing to say.
@@ -90,6 +91,15 @@ Execution flows through a small pipeline, each stage its own package under `inte
 - **Gotify is optional, off by default, and never an error condition.** Credentials are literal config values, not read
   from the environment. If `gotify.url`/`gotify.token` are unset, or `--no-notify` is passed, or `dry_run` is active,
   the report is printed to stdout instead of sent — never treat a missing/incomplete Gotify config as an error.
+- **Retry is a substring match on command output, not a parsed `retry-after`.** `runner.isRetryable` matches
+  `toomanyrequests`/`429 too many requests`/`rate limit` case-insensitively against combined output+error; it does not
+  parse or honor a registry's own `retry-after` value, which has been observed to be unreliable (e.g.
+  `retry-after: 609.219µs` from ghcr.io). Backoff is `RetryBaseDelay * 2^(attempt-1)`, jittered ±50%, hard-capped at 60s
+  — the cap and jitter range are intentionally not configurable (only `RetryMaxAttempts`/`RetryBaseDelay` are). Retry
+  applies uniformly wherever `runner.Run`/`RunAll` is called (`refresh_commands` and `after_commands` alike, including
+  the global `after_commands` in `main.go`), not gated per call site. Each attempt gets a fresh full `command_timeout`
+  budget rather than sharing one budget across the retry sequence, so worst-case wall time scales with
+  `RetryMaxAttempts * command_timeout` — in practice a rate-limit rejection returns fast, so this rarely matters.
 
 ### Config files are not to be read as part of exploration
 

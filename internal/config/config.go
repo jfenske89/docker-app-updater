@@ -28,10 +28,10 @@ type Override struct {
 	RefreshCommands [][]string `yaml:"refresh_commands"`
 	AfterCommands   [][]string `yaml:"after_commands"`
 
-	// Profiles is a freeform list of tags. An app with no Profiles set is
-	// always included, regardless of which --profile (if any) is passed.
-	// An app with Profiles set is included only when --profile matches one
-	// of them. There is no built-in profile vocabulary.
+	// Profiles is a freeform list of tags. With no --profile flag, only
+	// apps with no Profiles set are included. With --profile <name>, only
+	// apps whose Profiles include that name are included. There is no
+	// built-in profile vocabulary.
 	Profiles []string `yaml:"profiles"`
 
 	// SkipIfNoContainers overrides Config.SkipIfNoContainers for this one
@@ -89,6 +89,14 @@ type Config struct {
 	CommandTimeout         string        `yaml:"command_timeout"`
 	CommandTimeoutDuration time.Duration `yaml:"-"`
 
+	// RetryMaxAttempts/RetryBaseDelay control retrying a command whose
+	// output looks like a registry rate-limit response (e.g.
+	// "toomanyrequests" from docker compose pull) with exponential backoff
+	// and jitter.
+	RetryMaxAttempts       int           `yaml:"retry_max_attempts"`
+	RetryBaseDelay         string        `yaml:"retry_base_delay"`
+	RetryBaseDelayDuration time.Duration `yaml:"-"`
+
 	// SkipIfNoContainers controls whether an app with zero containers
 	// found (nothing running or ever created for its compose project) is
 	// left alone rather than started. Defaults to true: discovery
@@ -111,6 +119,12 @@ func (cfg Config) SkipsAppsWithoutContainers() bool {
 const defaultCommandTimeout = "15m"
 
 var defaultCommandTimeoutDuration = mustParseDuration(defaultCommandTimeout)
+
+const defaultRetryMaxAttempts = 3
+
+const defaultRetryBaseDelay = "5s"
+
+var defaultRetryBaseDelayDuration = mustParseDuration(defaultRetryBaseDelay)
 
 func mustParseDuration(s string) time.Duration {
 	d, err := time.ParseDuration(s)
@@ -202,6 +216,9 @@ func postProcess(cfg *Config) {
 	}
 
 	cfg.CommandTimeout, cfg.CommandTimeoutDuration = NormalizeCommandTimeout(cfg.CommandTimeout)
+
+	cfg.RetryMaxAttempts = NormalizeRetryMaxAttempts(cfg.RetryMaxAttempts)
+	cfg.RetryBaseDelay, cfg.RetryBaseDelayDuration = NormalizeRetryBaseDelay(cfg.RetryBaseDelay)
 }
 
 // NormalizeMaxThreads applies the same default/cap rules used when loading
@@ -230,4 +247,32 @@ func NormalizeCommandTimeout(s string) (string, time.Duration) {
 	}
 	logrus.Warnf("invalid command_timeout %q, using default (%s)", s, defaultCommandTimeout)
 	return defaultCommandTimeout, defaultCommandTimeoutDuration
+}
+
+// NormalizeRetryMaxAttempts applies the same default/cap rules used when
+// loading retry_max_attempts from a config file. Exported so CLI overrides
+// (--retry-max-attempts) go through identical validation.
+func NormalizeRetryMaxAttempts(n int) int {
+	if n <= 0 {
+		return defaultRetryMaxAttempts
+	}
+	if n > 10 {
+		logrus.Warnf("retry_max_attempts too high (%d), capping at 10", n)
+		return 10
+	}
+	return n
+}
+
+// NormalizeRetryBaseDelay applies the same default/validation rules used
+// when loading retry_base_delay from a config file. Exported so CLI
+// overrides (--retry-base-delay) go through identical validation.
+func NormalizeRetryBaseDelay(s string) (string, time.Duration) {
+	if s == "" {
+		return defaultRetryBaseDelay, defaultRetryBaseDelayDuration
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return s, d
+	}
+	logrus.Warnf("invalid retry_base_delay %q, using default (%s)", s, defaultRetryBaseDelay)
+	return defaultRetryBaseDelay, defaultRetryBaseDelayDuration
 }

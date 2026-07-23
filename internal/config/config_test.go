@@ -37,6 +37,12 @@ discovery:
 	if cfg.CommandTimeoutDuration != defaultCommandTimeoutDuration {
 		t.Errorf("CommandTimeoutDuration = %s, want %s", cfg.CommandTimeoutDuration, defaultCommandTimeoutDuration)
 	}
+	if cfg.RetryMaxAttempts != defaultRetryMaxAttempts {
+		t.Errorf("RetryMaxAttempts = %d, want default %d", cfg.RetryMaxAttempts, defaultRetryMaxAttempts)
+	}
+	if cfg.RetryBaseDelayDuration != defaultRetryBaseDelayDuration {
+		t.Errorf("RetryBaseDelayDuration = %s, want default %s", cfg.RetryBaseDelayDuration, defaultRetryBaseDelayDuration)
+	}
 	if len(cfg.RefreshCommands) != 2 {
 		t.Errorf("expected default refresh_commands, got %v", cfg.RefreshCommands)
 	}
@@ -49,6 +55,8 @@ func TestLoad_ParsesOverridesAndGotify(t *testing.T) {
 	path := writeConfig(t, `
 max_threads: 10
 command_timeout: 5m
+retry_max_attempts: 5
+retry_base_delay: 10s
 discovery:
   roots: [/mnt/data/apps, /mnt/storage/apps]
 excludes: [pihole]
@@ -74,6 +82,12 @@ gotify:
 	}
 	if cfg.CommandTimeoutDuration != 5*time.Minute {
 		t.Errorf("CommandTimeoutDuration = %s, want 5m", cfg.CommandTimeoutDuration)
+	}
+	if cfg.RetryMaxAttempts != 5 {
+		t.Errorf("RetryMaxAttempts = %d, want 5", cfg.RetryMaxAttempts)
+	}
+	if cfg.RetryBaseDelayDuration != 10*time.Second {
+		t.Errorf("RetryBaseDelayDuration = %s, want 10s", cfg.RetryBaseDelayDuration)
 	}
 	if len(cfg.Excludes) != 1 || cfg.Excludes[0] != "pihole" {
 		t.Errorf("Excludes = %v", cfg.Excludes)
@@ -139,6 +153,35 @@ func TestNormalizeCommandTimeout(t *testing.T) {
 	}
 	if s, d := NormalizeCommandTimeout("not-a-duration"); s != defaultCommandTimeout || d != defaultCommandTimeoutDuration {
 		t.Errorf("NormalizeCommandTimeout(invalid) = (%q, %s), want default", s, d)
+	}
+}
+
+func TestNormalizeRetryMaxAttempts(t *testing.T) {
+	cases := []struct {
+		in   int
+		want int
+	}{
+		{0, defaultRetryMaxAttempts},
+		{-1, defaultRetryMaxAttempts},
+		{5, 5},
+		{20, 10},
+	}
+	for _, c := range cases {
+		if got := NormalizeRetryMaxAttempts(c.in); got != c.want {
+			t.Errorf("NormalizeRetryMaxAttempts(%d) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestNormalizeRetryBaseDelay(t *testing.T) {
+	if s, d := NormalizeRetryBaseDelay(""); s != defaultRetryBaseDelay || d != defaultRetryBaseDelayDuration {
+		t.Errorf("NormalizeRetryBaseDelay(\"\") = (%q, %s), want default", s, d)
+	}
+	if s, d := NormalizeRetryBaseDelay("10s"); s != "10s" || d != 10*time.Second {
+		t.Errorf("NormalizeRetryBaseDelay(\"10s\") = (%q, %s), want (10s, 10s)", s, d)
+	}
+	if s, d := NormalizeRetryBaseDelay("not-a-duration"); s != defaultRetryBaseDelay || d != defaultRetryBaseDelayDuration {
+		t.Errorf("NormalizeRetryBaseDelay(invalid) = (%q, %s), want default", s, d)
 	}
 }
 

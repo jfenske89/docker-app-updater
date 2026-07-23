@@ -20,14 +20,16 @@ import (
 )
 
 type flags struct {
-	configPath     string
-	profile        string
-	dryRun         bool
-	discoverOnly   bool
-	noNotify       bool
-	logLevel       string
-	maxThreads     int
-	commandTimeout string
+	configPath       string
+	profile          string
+	dryRun           bool
+	discoverOnly     bool
+	noNotify         bool
+	logLevel         string
+	maxThreads       int
+	commandTimeout   string
+	retryMaxAttempts int
+	retryBaseDelay   string
 }
 
 func parseFlags() flags {
@@ -39,17 +41,21 @@ func parseFlags() flags {
 	logLevel := flag.String("log-level", "", "A logrus level, e.g. debug/info/warn (overrides config)")
 	maxThreads := flag.Int("max-threads", 0, "Apps processed concurrently, capped at 100 (overrides config)")
 	commandTimeout := flag.String("command-timeout", "", "A Go duration each command may run before being killed, e.g. 15m (overrides config)")
+	retryMaxAttempts := flag.Int("retry-max-attempts", 0, "How many times to retry a rate-limited command, capped at 10 (overrides config)")
+	retryBaseDelay := flag.String("retry-base-delay", "", "A Go duration, the initial retry backoff for a rate-limited command, e.g. 5s (overrides config)")
 	flag.Parse()
 
 	return flags{
-		configPath:     strings.TrimSpace(*configPath),
-		profile:        strings.TrimSpace(*profile),
-		dryRun:         *dryRun,
-		discoverOnly:   *discoverOnly,
-		noNotify:       *noNotify,
-		logLevel:       strings.TrimSpace(*logLevel),
-		maxThreads:     *maxThreads,
-		commandTimeout: strings.TrimSpace(*commandTimeout),
+		configPath:       strings.TrimSpace(*configPath),
+		profile:          strings.TrimSpace(*profile),
+		dryRun:           *dryRun,
+		discoverOnly:     *discoverOnly,
+		noNotify:         *noNotify,
+		logLevel:         strings.TrimSpace(*logLevel),
+		maxThreads:       *maxThreads,
+		commandTimeout:   strings.TrimSpace(*commandTimeout),
+		retryMaxAttempts: *retryMaxAttempts,
+		retryBaseDelay:   strings.TrimSpace(*retryBaseDelay),
 	}
 }
 
@@ -86,6 +92,14 @@ func run() int {
 
 	if f.commandTimeout != "" {
 		cfg.CommandTimeout, cfg.CommandTimeoutDuration = config.NormalizeCommandTimeout(f.commandTimeout)
+	}
+
+	if f.retryMaxAttempts > 0 {
+		cfg.RetryMaxAttempts = config.NormalizeRetryMaxAttempts(f.retryMaxAttempts)
+	}
+
+	if f.retryBaseDelay != "" {
+		cfg.RetryBaseDelay, cfg.RetryBaseDelayDuration = config.NormalizeRetryBaseDelay(f.retryBaseDelay)
 	}
 
 	apps, err := discovery.Discover(cfg)
@@ -129,7 +143,8 @@ func run() int {
 	}
 
 	if len(cfg.AfterCommands) > 0 {
-		if err := runner.RunAll(ctx, exec.OS, cfg.AfterCommands, "", "GLOBAL", cfg.CommandTimeoutDuration, cfg.DryRun); err != nil {
+		retry := runner.RetryOptions{MaxAttempts: cfg.RetryMaxAttempts, BaseDelay: cfg.RetryBaseDelayDuration}
+		if err := runner.RunAll(ctx, exec.OS, cfg.AfterCommands, "", "GLOBAL", cfg.CommandTimeoutDuration, cfg.DryRun, retry); err != nil {
 			logrus.Errorf("[after_commands] %s", err.Error())
 			hadFailure = true
 		}

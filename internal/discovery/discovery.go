@@ -23,9 +23,9 @@ type App struct {
 	RefreshCommands [][]string
 	AfterCommands   [][]string
 
-	// Profiles is empty for an app that should always run. A non-empty
-	// list restricts the app to invocations whose --profile matches one
-	// of these freeform tags.
+	// Profiles is empty for an app that only runs when no --profile is
+	// given. A non-empty list restricts the app to invocations whose
+	// --profile matches one of these freeform tags.
 	Profiles []string
 
 	// SkipIfNoContainers overrides Config.SkipIfNoContainers for this app.
@@ -127,17 +127,19 @@ func Discover(cfg config.Config) ([]App, error) {
 }
 
 // FilterByProfile returns the apps that should run for the given profile.
-// An app with no Profiles set always runs. An app with Profiles set only
-// runs when profile is non-empty and appears in its Profiles list. Passing
-// an empty profile therefore runs only untagged apps.
+// Passing an empty profile runs only untagged apps. Passing a non-empty
+// profile runs only apps whose Profiles list contains it — untagged apps
+// are excluded in that case.
 func FilterByProfile(apps []App, profile string) []App {
 	result := make([]App, 0, len(apps))
 	for _, app := range apps {
-		if len(app.Profiles) == 0 {
-			result = append(result, app)
+		if profile == "" {
+			if len(app.Profiles) == 0 {
+				result = append(result, app)
+			}
 			continue
 		}
-		if profile != "" && contains(app.Profiles, profile) {
+		if contains(app.Profiles, profile) {
 			result = append(result, app)
 		}
 	}

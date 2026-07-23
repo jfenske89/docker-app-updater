@@ -6,6 +6,12 @@ log_level: info
 max_threads: 10
 command_timeout: 15m
 
+# A command whose output looks like a registry rate-limit response (e.g.
+# "toomanyrequests" from docker compose pull) is retried with exponential
+# backoff and jitter instead of failing immediately.
+retry_max_attempts: 3
+retry_base_delay: 5s
+
 # An app with zero containers found (nothing running or ever created for
 # its compose project) is left alone rather than started, so discovery
 # doesn't resurrect something you intentionally took down with
@@ -44,10 +50,10 @@ overrides: {}
 #     refresh_commands: [["./refresh.sh"]]
 #
 #   # Tags are freeform strings you invent yourself - the tool has no
-#   # built-in idea of what a "profile" is called or means. An app with no
-#   # `profiles` key always runs. An app with `profiles` set only runs when
-#   # --profile matches one of them; running with no --profile flag at all
-#   # runs only untagged apps.
+#   # built-in idea of what a "profile" is called or means. Running with no
+#   # --profile flag runs only untagged apps. Running with --profile <name>
+#   # runs only apps whose `profiles` include that name; untagged apps are
+#   # skipped in that case.
 #   immich:
 #     profiles: [heavy]
 #

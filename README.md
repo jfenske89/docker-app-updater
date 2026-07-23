@@ -35,6 +35,11 @@ Or set an explicit path with `--config`.
 - **max_threads** (_integer_, default `3`, capped at 100): apps processed concurrently.
 - **command_timeout** (_string_, default `15m`): a Go duration each command may run before being killed and treated as a
   failure.
+- **retry_max_attempts** (_integer_, default `3`, capped at 10): how many times to retry a command whose output looks
+  like a registry rate-limit response (e.g. `toomanyrequests`, HTTP 429), with exponential backoff and jitter between
+  attempts. `1` disables retries.
+- **retry_base_delay** (_string_, default `5s`): a Go duration; the backoff delay doubles each retry attempt (capped at
+  60s) and gets ±50% jitter to desynchronize concurrent apps hitting the same registry.
 - **discovery.roots** (_[]string_): directories scanned one level deep for compose projects;
   `<root>/<name>/docker-compose.yml` is discovered as app `<name>`.
 - **discovery.compose_filenames** (_[]string_, default `docker-compose.yml`, `docker-compose.yaml`, `compose.yml`,
@@ -61,8 +66,9 @@ Every token in `refresh_commands`/`after_commands` accepts `{{app.name}}`, `{{ap
 
 ### Profiles
 
-Profiles gate which apps update. Tags are freeform strings, not a built-in vocabulary. An app without profiles always
-updates; an app with profiles only updates when `--profile <name>` matches one of them.
+Profiles gate which apps update. Tags are freeform strings, not a built-in vocabulary. With no `--profile` flag, only
+apps without profiles update. With `--profile <name>`, only apps whose `profiles` include that name update — untagged
+apps are skipped.
 
 ```yaml
 overrides:
@@ -119,6 +125,8 @@ A multi-service project rolls up to its most severe status (`error` > `updated` 
 - `--log-level <level>`: a logrus level, e.g. `debug`/`info`/`warn` (overrides config)
 - `--max-threads <n>`: concurrency cap, up to 100 (overrides config)
 - `--command-timeout <duration>`: per-command timeout, e.g. `15m` (overrides config)
+- `--retry-max-attempts <n>`: retry cap for rate-limited commands, up to 10 (overrides config)
+- `--retry-base-delay <duration>`: initial retry backoff for rate-limited commands, e.g. `5s` (overrides config)
 
 ## Development
 

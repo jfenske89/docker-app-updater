@@ -52,6 +52,8 @@ type Result struct {
 func Run(ctx context.Context, app discovery.App, cfg config.Config, executor exec.Executor) Result {
 	started := time.Now()
 
+	retry := runner.RetryOptions{MaxAttempts: cfg.RetryMaxAttempts, BaseDelay: cfg.RetryBaseDelayDuration}
+
 	before, snapErr := dockercli.Snapshot(ctx, executor, app.Path)
 	if snapErr != nil {
 		logrus.Debugf("[%s] failed to snapshot before state: %s", app.Name, snapErr.Error())
@@ -66,7 +68,7 @@ func Run(ctx context.Context, app discovery.App, cfg config.Config, executor exe
 		return Result{App: app, Status: StatusSkipped, Duration: time.Since(started)}
 	}
 
-	if err := runner.RunAll(ctx, executor, app.RefreshCommands, app.Path, app.Name, cfg.CommandTimeoutDuration, cfg.DryRun); err != nil {
+	if err := runner.RunAll(ctx, executor, app.RefreshCommands, app.Path, app.Name, cfg.CommandTimeoutDuration, cfg.DryRun, retry); err != nil {
 		return Result{App: app, Status: StatusError, Duration: time.Since(started), Err: err}
 	}
 
@@ -79,7 +81,7 @@ func Run(ctx context.Context, app discovery.App, cfg config.Config, executor exe
 		return Result{App: app, Status: StatusError, Duration: time.Since(started), Err: snapErr}
 	}
 
-	if err := runner.RunAll(ctx, executor, app.AfterCommands, app.Path, app.Name, cfg.CommandTimeoutDuration, cfg.DryRun); err != nil {
+	if err := runner.RunAll(ctx, executor, app.AfterCommands, app.Path, app.Name, cfg.CommandTimeoutDuration, cfg.DryRun, retry); err != nil {
 		return Result{App: app, Status: StatusError, Duration: time.Since(started), Err: err}
 	}
 

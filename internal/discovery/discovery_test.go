@@ -103,14 +103,14 @@ func TestFilterByProfile(t *testing.T) {
 		}
 	})
 
-	t.Run("matching profile includes untagged plus that tag", func(t *testing.T) {
+	t.Run("matching profile runs only that tag, excluding untagged", func(t *testing.T) {
 		got := FilterByProfile(apps, "heavy")
 		names := map[string]bool{}
 		for _, a := range got {
 			names[a.Name] = true
 		}
-		if !names["untagged"] || !names["heavy-only"] || names["gpu-only"] {
-			t.Errorf("FilterByProfile(apps, \"heavy\") = %+v, want [untagged heavy-only]", got)
+		if names["untagged"] || !names["heavy-only"] || names["gpu-only"] {
+			t.Errorf("FilterByProfile(apps, \"heavy\") = %+v, want [heavy-only]", got)
 		}
 	})
 }
