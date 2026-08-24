@@ -3,7 +3,7 @@ module github.com/jfenske89/docker-app-updater
 go 1.26.5
 
 require (
-	github.com/sirupsen/logrus v1.9.4
+	github.com/sirupsen/logrus v1.10.1
 	github.com/sourcegraph/conc v0.3.0
 	gopkg.in/yaml.v3 v3.0.1
 )
